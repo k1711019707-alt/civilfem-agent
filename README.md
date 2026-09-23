@@ -7,6 +7,7 @@
 ## 能力
 
 - JSON、IFC、DXF、STEP、FCStd 输入资产检查与 SHA-256 追踪
+- 中文 GUI 支持 DXF 图纸检查、几何摘要和人工确认后建模
 - Pydantic Canonical Structural Model 与钢构件插件验证
 - Gmsh H 型钢实体四面体网格
 - OpenSeesPy 二维线弹性悬臂梁求解
@@ -50,7 +51,7 @@ $env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
 python -m pytest -q
 ```
 
-当前验证基线：21 项测试通过。
+当前验证基线：23 项测试通过。
 
 ## Python 流程示例
 
@@ -83,7 +84,7 @@ $env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
 streamlit run gui.py
 ```
 
-浏览器默认打开 `http://localhost:8501`。页面按输入检查、模型验证、Gmsh 网格、OpenSeesPy/CalculiX 求解、状态查询和 Markdown/HTML 报告下载顺序操作。上传文件只写入 `CIVILFEM_PROJECT_ROOT` 下的 `.civilfem/uploads/`，GUI 不接受 shell 命令。
+浏览器默认打开 `http://localhost:8501`。页面支持上传 JSON 或 DXF 图纸，按输入检查、模型验证、Gmsh 网格、OpenSeesPy/CalculiX 求解、状态查询和 Markdown/HTML 报告下载顺序操作。DXF 只提供图层、实体、边界和长度等几何证据；截面、材料、荷载、长度和边界必须人工确认。DWG 请先另存为 DXF。上传文件只写入 `CIVILFEM_PROJECT_ROOT` 下的 `.civilfem/uploads/`，GUI 不接受 shell 命令。
 
 ## MCP Server
 

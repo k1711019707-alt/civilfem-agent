@@ -83,6 +83,28 @@ def inspect_uploaded_model(path: str | Path, project_root: str | Path = ".") -> 
     return {"status": status, "inspection": inspection, "validation": validation, "model": model_data, "error": None}
 
 
+def build_cad_model(geometry: dict[str, Any], parameters: dict[str, Any]) -> dict[str, Any]:
+    """使用用户确认参数把 CAD 几何摘要转换为 Canonical Model。"""
+    # 读取项目标识和用户确认的构件参数。
+    project_id = str(geometry.get("project_id") or "cad-project")
+    section = {key: parameters.get(key) for key in ("h", "b", "tw", "tf")}
+    steel = parameters.get("steel")
+    length = float(parameters.get("length") or geometry.get("length") or 0)
+    # 缺少关键工程参数时明确要求人工确认。
+    if any(value is None for value in section.values()) or not steel or length <= 0:
+        return {"status": "pending_confirmation", "error": "CAD 输入必须确认 h、b、tw、tf、steel 和 length"}
+    # 组织与 JSON 输入一致的严格模型数据。
+    record = {"project_id": project_id, "id": str(parameters.get("id") or "CAD-B-1"), "type": "steel_beam", "section": section, "steel": str(steel), "length": length, "Lx": float(parameters.get("Lx") or length), "Ly": float(parameters.get("Ly") or length), "N": float(parameters.get("N") or 0), "Mx": float(parameters.get("Mx") or 0), "My": float(parameters.get("My") or 0), "V": float(parameters.get("V") or 0)}
+    # 使用统一工作流验证，不复制 Pydantic 规则。
+    try:
+        model = extract_structural_model(record)
+        validation = validate_structural_model(model).model_dump(mode="json")
+    except Exception as error:
+        return {"status": "invalid", "error": f"CAD 参数无效: {error}"}
+    # 返回真实验证状态和模型。
+    return {"status": "valid" if validation.get("status") == "valid" else "pending_confirmation", "validation": validation, "model": model.model_dump(mode="json"), "error": None}
+
+
 def backend_available(backend: str) -> bool:
     """返回指定后端当前是否可用。"""
     # 仅查询既有能力探测结果，不改变后端状态。
@@ -136,8 +158,8 @@ def main() -> None:
     st.info(f"项目根目录：{project_root}")
     st.subheader("后端能力")
     st.json(capabilities())
-    # 接收结构 JSON 文件并保存到受控目录。
-    uploaded = st.file_uploader("上传结构 JSON", type=["json"])
+    # 接收 JSON 或 DXF 图纸并保存到受控目录。
+    uploaded = st.file_uploader("上传结构 JSON 或 DXF 图纸", type=["json", "dxf"])
     if uploaded is None:
         st.warning("请先上传 JSON 输入文件。")
         return
@@ -148,8 +170,37 @@ def main() -> None:
     except Exception as error:
         st.error(f"上传文件保存失败：{error}")
         return
-    # 执行检查和验证并保存到会话状态。
-    inspection = inspect_uploaded_model(input_path, project_root)
+    # 执行输入检查；DXF 先只读摘要，避免从图纸静默猜工程参数。
+    if input_path.suffix.lower() == ".dxf":
+        cad_inspection = inspect_input(str(input_path), str(project_root))
+        _show_json(st, "CAD 图纸检查", cad_inspection)
+        if cad_inspection.get("status") != "inspected":
+            st.error(cad_inspection.get("issues") or "DXF 检查失败。")
+            return
+        st.warning("DXF 只提供几何证据；截面、材料、荷载、长度和边界必须人工确认。DWG 请先另存为 DXF。")
+        bounds = cad_inspection.get("bounds") or [0.0, 0.0, 0.0, 0.0]
+        default_length = max(float(cad_inspection.get("line_length") or 0), float(bounds[2]) - float(bounds[0]))
+        with st.form("cad_parameters", border=True):
+            st.subheader("确认工程参数")
+            cad_id = st.text_input("构件编号", value="CAD-B-1")
+            col1, col2 = st.columns(2)
+            h = col1.number_input("截面高度 h（mm）", min_value=0.1, value=300.0)
+            b = col2.number_input("翼缘宽度 b（mm）", min_value=0.1, value=300.0)
+            tw = col1.number_input("腹板厚度 tw（mm）", min_value=0.1, value=10.0)
+            tf = col2.number_input("翼缘厚度 tf（mm）", min_value=0.1, value=15.0)
+            steel = st.text_input("钢材牌号", value="Q355")
+            length = st.number_input("构件长度（mm，需确认）", min_value=0.1, value=max(default_length, 6000.0))
+            m_x = st.number_input("弯矩 Mx（kN·m）", value=0.0)
+            shear = st.number_input("剪力 V（kN）", value=0.0)
+            confirmed = st.form_submit_button("确认 CAD 参数并建立模型", type="primary")
+        if not confirmed:
+            return
+        cad_model = build_cad_model({"project_id": input_path.stem, "length": length}, {"id": cad_id, "h": h, "b": b, "tw": tw, "tf": tf, "steel": steel, "length": length, "Mx": m_x, "V": shear})
+        inspection = cad_model
+    else:
+        # JSON 直接执行输入检查、模型提取和验证。
+        inspection = inspect_uploaded_model(input_path, project_root)
+    # 保存检查结果并显示验证信息。
     st.session_state["inspection"] = inspection
     _show_json(st, "输入与模型验证", {key: value for key, value in inspection.items() if key != "model"})
     # 非 valid 模型不得继续执行高成本后端。

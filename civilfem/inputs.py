@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -91,8 +92,40 @@ def _inspect_dxf(path: Path) -> dict[str, Any]:
     document = ezdxf.readfile(str(path))
     # 获取模型空间实体集合。
     space = document.modelspace()
-    # 返回图元和图层统计。
-    return {"count": len(space), "layers": sorted({entity.dxf.layer for entity in space})}
+    # 初始化几何摘要。
+    layers: set[str] = set()
+    entity_types: set[str] = set()
+    points: list[tuple[float, float]] = []
+    line_length = 0.0
+    # 逐图元提取可确定的二维信息，不猜测工程语义。
+    for entity in space:
+        layers.add(entity.dxf.layer)
+        entity_types.add(entity.dxftype())
+        kind = entity.dxftype()
+        if kind == "LINE":
+            start = (float(entity.dxf.start.x), float(entity.dxf.start.y))
+            end = (float(entity.dxf.end.x), float(entity.dxf.end.y))
+            points.extend((start, end))
+            line_length += math.dist(start, end)
+        elif kind in {"LWPOLYLINE", "POLYLINE"}:
+            vertices = [(float(point[0]), float(point[1])) for point in entity.get_points("xy")]
+            points.extend(vertices)
+            line_length += sum(math.dist(a, b) for a, b in zip(vertices, vertices[1:]))
+            if getattr(entity, "closed", False) and len(vertices) > 2:
+                line_length += math.dist(vertices[-1], vertices[0])
+        elif kind == "CIRCLE":
+            center = (float(entity.dxf.center.x), float(entity.dxf.center.y))
+            radius = float(entity.dxf.radius)
+            points.extend([(center[0] - radius, center[1] - radius), (center[0] + radius, center[1] + radius)])
+        elif kind == "ARC":
+            center = (float(entity.dxf.center.x), float(entity.dxf.center.y))
+            radius = float(entity.dxf.radius)
+            points.extend([(center[0] - radius, center[1] - radius), (center[0] + radius, center[1] + radius)])
+            line_length += math.radians(float(entity.dxf.end_angle - entity.dxf.start_angle) % 360) * radius
+    # 为空图纸返回空边界，否则返回 xmin、ymin、xmax、ymax。
+    bounds = None if not points else [min(point[0] for point in points), min(point[1] for point in points), max(point[0] for point in points), max(point[1] for point in points)]
+    # 返回图元、图层和几何统计。
+    return {"count": len(space), "layers": sorted(layers), "entity_types": sorted(entity_types), "bounds": bounds, "line_length": line_length}
 
 
 def _inspect_step(path: Path) -> dict[str, Any]:

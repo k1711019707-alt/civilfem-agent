@@ -15,6 +15,7 @@ from civilfem.runtime import create_run, load_run
 from civilfem.reports import generate_report
 from civilfem.mcp_api import build_mesh, submit_simulation
 from civilfem.visualization import render_mesh
+from gui import build_cad_model
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +94,38 @@ def test_step_asset_inspection(tmp_path):
     assert result["status"] == "inspected"
     assert result["count"] == 1
     assert "CARTESIAN_POINT" in result["entity_types"]
+
+
+def test_dxf_asset_inspection_returns_geometry_summary(tmp_path):
+    """DXF 检查必须返回图层、实体、边界和线段长度摘要。"""
+    # 使用 ezdxf 构造最小 CAD 图纸。
+    import ezdxf
+    document = ezdxf.new("R2010")
+    space = document.modelspace()
+    space.add_line((0, 0), (100, 0), dxfattribs={"layer": "BEAM"})
+    space.add_line((100, 0), (100, 50), dxfattribs={"layer": "BEAM"})
+    path = tmp_path / "beam.dxf"
+    document.saveas(path)
+    # 执行只读 DXF 检查。
+    result = inspect_asset(path, tmp_path)
+    # 验证几何摘要字段。
+    assert result["status"] == "inspected"
+    assert result["format"] == "dxf"
+    assert result["count"] == 2
+    assert result["layers"] == ["BEAM"]
+    assert result["bounds"] == [0.0, 0.0, 100.0, 50.0]
+    assert result["line_length"] == pytest.approx(150.0)
+
+
+def test_cad_model_requires_explicit_engineering_parameters():
+    """CAD 几何不能静默猜测截面和材料。"""
+    # 缺少关键参数时返回待确认状态。
+    pending = build_cad_model({"project_id": "cad"}, {})
+    assert pending["status"] == "pending_confirmation"
+    # 参数完整时生成可验证 Canonical Model。
+    ready = build_cad_model({"project_id": "cad", "length": 6000}, {"h": 300, "b": 300, "tw": 10, "tf": 15, "steel": "Q355"})
+    assert ready["status"] == "valid"
+    assert ready["model"]["components"][0]["length"] == 6000
 
 
 def test_fcstd_asset_inspection(tmp_path):
