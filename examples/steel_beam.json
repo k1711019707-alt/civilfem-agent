@@ -1,0 +1,12 @@
+{
+  "project_id": "demo-steel-beam",
+  "id": "B-001",
+  "type": "steel_beam",
+  "section": {"h": 300, "b": 300, "tw": 10, "tf": 15},
+  "steel": "Q355",
+  "length": 6000,
+  "Mx": 100,
+  "Lx": 6000,
+  "Ly": 6000,
+  "evidence": [{"source": "json", "reference": "examples/steel_beam.json"}]
+}

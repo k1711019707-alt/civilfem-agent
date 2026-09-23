@@ -8,23 +8,13 @@ from pathlib import Path
 # 导入统一模型和插件注册表。
 from .schemas import CanonicalModel, ModelStatus, ValidationReport
 from .plugins import PLUGINS
+from .inputs import inspect_asset
 
 
-def inspect_input(path: str) -> dict:
-    """只读检查 JSON 输入文件。"""
-    # 解析用户路径并拒绝非文件输入。
-    file_path = Path(path)
-    if not file_path.is_file():
-        return {"status": "invalid", "issues": [f"文件不存在: {path}"]}
-    # 读取 UTF-8 JSON 内容。
-    try:
-        data = json.loads(file_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        return {"status": "invalid", "issues": [str(error)]}
-    # 统一单对象和数组形态。
-    records = data if isinstance(data, list) else [data]
-    # 返回可追溯统计，不直接开始求解。
-    return {"status": "inspected", "format": "json", "count": len(records), "keys": sorted(records[0]) if records and isinstance(records[0], dict) else []}
+def inspect_input(path: str, project_root: str | None = None) -> dict:
+    """只读检查 JSON、IFC 或 DXF 输入文件。"""
+    # 委托给统一输入资产检查器。
+    return inspect_asset(path, project_root)
 
 
 def extract_structural_model(data: dict | list[dict]) -> CanonicalModel:

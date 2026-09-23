@@ -96,6 +96,8 @@ class Component(BaseModel):
     Lx: float = 0.0
     # y 方向计算长度，单位 mm。
     Ly: float = 0.0
+    # 构件几何长度，单位 mm；为零时网格器可回退到 Lx。
+    length: float = Field(default=0.0, ge=0)
     # 来源证据列表。
     evidence: list[Evidence] = Field(default_factory=list)
 
@@ -128,4 +130,3 @@ class ValidationReport(BaseModel):
     issues: list[str] = Field(default_factory=list)
     # 通过验证的对象标识。
     object_id: str | None = None
-
