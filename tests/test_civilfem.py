@@ -9,7 +9,7 @@ from pathlib import Path
 # 导入模型、插件和验证服务。
 from civilfem.schemas import CanonicalModel, ModelStatus, Section
 from civilfem.plugins import SteelBeamPlugin
-from civilfem.workflow import validate_structural_model
+from civilfem.workflow import extract_structural_model, validate_structural_model
 from civilfem.inputs import inspect_asset, allowed_path
 from civilfem.runtime import create_run, load_run
 from civilfem.reports import generate_report
@@ -34,6 +34,17 @@ def test_valid_model():
     """合法模型通过插件验证。"""
     report = validate_structural_model(sample_model())
     assert report.status is ModelStatus.VALID
+
+
+def test_example_record_extracts_without_project_metadata():
+    """顶层项目字段不得泄漏到严格构件模型。"""
+    # 构造与示例文件相同的扁平记录。
+    record = {"project_id": "demo", "id": "B-1", "type": "steel_beam", "section": {"h": 300, "b": 300, "tw": 10, "tf": 15}, "steel": "Q355", "Lx": 6000, "Ly": 6000}
+    # 提取严格 Canonical Model。
+    model = extract_structural_model(record)
+    # 验证项目字段和构件字段被正确分离。
+    assert model.project_id == "demo"
+    assert model.components[0].id == "B-1"
 
 
 def test_missing_steel_pending():
@@ -144,6 +155,24 @@ def test_missing_calculix_is_not_completed(tmp_path):
     """缺少 CalculiX 时不得伪造完成状态。"""
     result = submit_simulation({"project_id": "p"}, str(tmp_path), backend="calculix")
     assert result["status"] != "completed"
+
+
+def test_calculix_uses_configured_executable_and_replaces_bad_output(tmp_path, monkeypatch):
+    """CalculiX 必须使用可信环境配置并容忍不可解码输出。"""
+    # 创建由 Python 执行的最小伪求解器脚本。
+    script = tmp_path / "model"
+    script.write_text("import sys\nsys.stdout.buffer.write(b'\\x81')\n", encoding="utf-8")
+    # 创建满足运行接口约定的输入文件。
+    solver_input = tmp_path / "model.inp"
+    solver_input.write_text("*HEADING\n", encoding="ascii")
+    # 将当前 Python 解释器配置为可信求解器可执行文件。
+    monkeypatch.setenv("CIVILFEM_CALCULIX", __import__("sys").executable)
+    # 提交真实子进程并读取运行清单。
+    result = submit_simulation({"project_id": "p"}, str(tmp_path), backend="calculix", solver_input=str(solver_input))
+    # 验证求解完成且非法字节被替换而未导致运行器崩溃。
+    assert result["status"] == "completed"
+    assert result["returncode"] == 0
+    assert "�" in result["stdout"]
 
 
 def test_opensees_cantilever_matches_elastic_solution(tmp_path):

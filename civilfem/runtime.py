@@ -6,6 +6,7 @@ from __future__ import annotations
 # 导入标准库运行工具。
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import uuid
@@ -23,12 +24,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _calculix_executable() -> str | None:
+    """返回服务配置或 PATH 中的 CalculiX 可执行文件。"""
+    # 优先读取由服务启动方设置的可信可执行文件路径。
+    configured = os.environ.get("CIVILFEM_CALCULIX")
+    # 仅接受真实文件，避免把无效配置传给子进程。
+    if configured and Path(configured).expanduser().is_file():
+        # 返回规范化绝对路径。
+        return str(Path(configured).expanduser().resolve())
+    # 回退到 PATH 中的常见命令名。
+    return next((command for name in ("ccx", "calculix", "CalculiX") if (command := shutil.which(name))), None)
+
+
 def capabilities() -> dict[str, bool]:
     """探测本机可用开源网格和求解后端。"""
     # 检查 Gmsh 命令和 Python 模块。
     gmsh = shutil.which("gmsh") is not None or importlib.util.find_spec("gmsh") is not None
-    # 检查 CalculiX 常见命令名称。
-    calculix = any(shutil.which(name) for name in ("ccx", "calculix", "CalculiX"))
+    # 检查服务配置或 CalculiX 常见命令名称。
+    calculix = _calculix_executable() is not None
     # 检查 OpenSeesPy Python 模块。
     openseespy = importlib.util.find_spec("openseespy") is not None
     # 返回后端能力表。
@@ -120,13 +133,13 @@ def submit_run(project_root: str | Path, backend: str, input_hash: str | None = 
         except ValueError as error:
             manifest.update({"status": "failed", "error": str(error), "finished_at": _now()})
         else:
-            # 仅允许固定命令名，禁止任意 shell 字符串。
-            command = "ccx" if backend == "calculix" else None
+            # 仅使用可信配置解析出的固定可执行文件，禁止任意 shell 字符串。
+            command = _calculix_executable() if backend == "calculix" else None
             if command is None:
                 manifest.update({"status": "not_implemented", "error": f"尚未实现后端执行器: {backend}", "finished_at": _now()})
             else:
                 # 以参数数组启动外部求解器。
-                completed = subprocess.run([command, input_path.stem], cwd=input_path.parent, capture_output=True, text=True, timeout=300, check=False)
+                completed = subprocess.run([command, input_path.stem], cwd=input_path.parent, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
                 # 根据退出码记录完成或失败。
                 manifest.update({"status": "completed" if completed.returncode == 0 else "failed", "returncode": completed.returncode, "stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:], "finished_at": _now()})
     # 持久化最终状态。

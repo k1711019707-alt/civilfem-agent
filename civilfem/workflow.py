@@ -23,8 +23,8 @@ def extract_structural_model(data: dict | list[dict]) -> CanonicalModel:
     records = data if isinstance(data, list) else [data]
     # 读取项目标识，缺省值仅用于演示。
     project_id = records[0].get("project_id", "demo") if records else "demo"
-    # 去掉项目字段后构造构件对象。
-    components = [record.get("component", record) for record in records]
+    # 优先读取包装构件，否则从扁平记录中剥离项目级元数据。
+    components = [record["component"] if "component" in record else {key: value for key, value in record.items() if key != "project_id"} for record in records]
     # 创建版本化模型。
     return CanonicalModel(project_id=project_id, components=components)
 
