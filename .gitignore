@@ -1,0 +1,26 @@
+# Python 缓存和测试产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Python 构建产物
+*.egg-info/
+build/
+dist/
+
+# 本地环境和敏感配置
+.env
+.venv/
+env/
+
+# 编辑器和系统文件
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+
+# 求解器临时输出
+*.dat
+*.frd
+*.sta
+*.msg

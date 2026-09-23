@@ -1,0 +1,47 @@
+{
+  "tolerance": 0.02,
+  "n_assertions": 5,
+  "n_fail": 0,
+  "max_rel_err": 0.0,
+  "rows": [
+    {
+      "case": "E01",
+      "item": "axial_stability",
+      "got": 178.67,
+      "want": 178.67,
+      "rel_err": 0.0,
+      "status": "PASS"
+    },
+    {
+      "case": "E02",
+      "item": "bending_strength",
+      "got": 107.5,
+      "want": 107.5,
+      "rel_err": 0.0,
+      "status": "PASS"
+    },
+    {
+      "case": "E03",
+      "item": "shear_strength",
+      "got": 29.63,
+      "want": 29.63,
+      "rel_err": 0.0,
+      "status": "PASS"
+    },
+    {
+      "case": "E04",
+      "item": "axial_stability",
+      "got": 369.25,
+      "want": 369.25,
+      "rel_err": 0.0,
+      "status": "PASS"
+    },
+    {
+      "case": "E04",
+      "item": "整体结论",
+      "got": "FAIL",
+      "want": "FAIL",
+      "status": "PASS"
+    }
+  ]
+}

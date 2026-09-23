@@ -1,0 +1,96 @@
+*HEADING
+steel2inp | member=KL-1 | section=H500x200x10x16 | steel=Q355 | L=6000mm | solver=ccx
+** support=简支（一端铰支 + 一端滚动） | load=udl=30 | units: mm-N-MPa (mass: t)
+** section props  A=1.1080e+04 mm2  Ix=4.6037e+08 mm4  Iy=2.1372e+07 mm4  J=7.0213e+05 mm4
+**
+*NODE
+1, 0., 0., 0.
+2, 300, 0., 0.
+3, 600, 0., 0.
+4, 900, 0., 0.
+5, 1200, 0., 0.
+6, 1500, 0., 0.
+7, 1800, 0., 0.
+8, 2100, 0., 0.
+9, 2400, 0., 0.
+10, 2700, 0., 0.
+11, 3000, 0., 0.
+12, 3300, 0., 0.
+13, 3600, 0., 0.
+14, 3900, 0., 0.
+15, 4200, 0., 0.
+16, 4500, 0., 0.
+17, 4800, 0., 0.
+18, 5100, 0., 0.
+19, 5400, 0., 0.
+20, 5700, 0., 0.
+21, 6000, 0., 0.
+**
+*ELEMENT, TYPE=B31, ELSET=ALL
+1, 1, 2
+2, 2, 3
+3, 3, 4
+4, 4, 5
+5, 5, 6
+6, 6, 7
+7, 7, 8
+8, 8, 9
+9, 9, 10
+10, 10, 11
+11, 11, 12
+12, 12, 13
+13, 13, 14
+14, 14, 15
+15, 15, 16
+16, 16, 17
+17, 17, 18
+18, 18, 19
+19, 19, 20
+20, 20, 21
+**
+*NSET, NSET=NALL, GENERATE
+1, 21, 1
+*NSET, NSET=NSTART
+1,
+*NSET, NSET=NEND
+21,
+*ELSET, ELSET=EALL, GENERATE
+1, 20, 1
+**
+*BEAM SECTION, ELSET=ALL, MATERIAL=STEEL, SECTION=GENERAL
+11080, 4.603655e+08, 0., 2.137233e+07, 7.021333e+05
+0., 0., -1.
+**
+*MATERIAL, NAME=STEEL
+*ELASTIC
+2.060000e+05, 0.3
+*DENSITY
+7.850000e-09
+**
+*BOUNDARY
+NSTART, 1, 1, 0.
+NSTART, 2, 2, 0.
+NSTART, 3, 3, 0.
+NSTART, 4, 4, 0.
+NEND, 2, 2, 0.
+NEND, 3, 3, 0.
+NEND, 4, 4, 0.
+**
+*STEP, NLGEOM=NO
+*STATIC
+1., 1., 1e-05, 1.
+**
+** 均布荷载：P3 表示沿单元局部 3 方向（此处为全局 -Z）的线荷载
+*DLOAD
+EALL, P3, -30
+**
+*NODE PRINT, NSET=NALL
+U, RF
+*EL PRINT, ELSET=ALL
+S
+*NODE FILE
+U, RF
+*EL FILE
+S
+*END STEP
+** 参考屈服强度 fy = 355 N/mm2（Q355）

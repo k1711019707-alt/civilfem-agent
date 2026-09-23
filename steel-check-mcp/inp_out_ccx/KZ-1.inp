@@ -1,0 +1,87 @@
+*HEADING
+steel2inp | member=KZ-1 | section=H300x300x10x15 | steel=Q355 | L=4000mm | solver=ccx
+** support=悬臂（一端固接 + 一端自由） | load=point_center=50000 | units: mm-N-MPa (mass: t)
+** section props  A=1.1700e+04 mm2  Ix=1.9933e+08 mm4  Iy=6.7522e+07 mm4  J=7.6500e+05 mm4
+**
+*NODE
+1, 0., 0., 0.
+2, 250, 0., 0.
+3, 500, 0., 0.
+4, 750, 0., 0.
+5, 1000, 0., 0.
+6, 1250, 0., 0.
+7, 1500, 0., 0.
+8, 1750, 0., 0.
+9, 2000, 0., 0.
+10, 2250, 0., 0.
+11, 2500, 0., 0.
+12, 2750, 0., 0.
+13, 3000, 0., 0.
+14, 3250, 0., 0.
+15, 3500, 0., 0.
+16, 3750, 0., 0.
+17, 4000, 0., 0.
+**
+*ELEMENT, TYPE=B31, ELSET=ALL
+1, 1, 2
+2, 2, 3
+3, 3, 4
+4, 4, 5
+5, 5, 6
+6, 6, 7
+7, 7, 8
+8, 8, 9
+9, 9, 10
+10, 10, 11
+11, 11, 12
+12, 12, 13
+13, 13, 14
+14, 14, 15
+15, 15, 16
+16, 16, 17
+**
+*NSET, NSET=NALL, GENERATE
+1, 17, 1
+*NSET, NSET=NSTART
+1,
+*NSET, NSET=NEND
+17,
+*NSET, NSET=NMID
+9,
+**
+*BEAM SECTION, ELSET=ALL, MATERIAL=STEEL, SECTION=GENERAL
+11700, 1.993275e+08, 0., 6.752250e+07, 7.650000e+05
+0., 0., -1.
+**
+*MATERIAL, NAME=STEEL
+*ELASTIC
+2.060000e+05, 0.3
+*DENSITY
+7.850000e-09
+**
+*BOUNDARY
+NSTART, 1, 1, 0.
+NSTART, 2, 2, 0.
+NSTART, 3, 3, 0.
+NSTART, 4, 4, 0.
+NSTART, 5, 5, 0.
+NSTART, 6, 6, 0.
+**
+*STEP, NLGEOM=NO
+*STATIC
+1., 1., 1e-05, 1.
+**
+** 跨中集中力，沿全局 -Z
+*CLOAD
+NMID, 3, -50000
+**
+*NODE PRINT, NSET=NALL
+U, RF
+*EL PRINT, ELSET=ALL
+S
+*NODE FILE
+U, RF
+*EL FILE
+S
+*END STEP
+** 参考屈服强度 fy = 355 N/mm2（Q355）
