@@ -50,7 +50,7 @@ $env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
 python -m pytest -q
 ```
 
-当前验证基线：18 项测试通过。
+当前验证基线：21 项测试通过。
 
 ## Python 流程示例
 
@@ -70,6 +70,20 @@ report = generate_report(run["run_id"], project_root=".", fmt="markdown")
 ```
 
 建议先检查输入并确认 `validation.status == "valid"`，再提交网格或求解任务。
+
+## 中文 Web GUI
+
+安装 GUI 可选依赖并启动：
+
+```powershell
+conda activate fangzhen
+python -m pip install -e ".[gui]"
+$env:CIVILFEM_PROJECT_ROOT = (Get-Location).Path
+$env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
+streamlit run gui.py
+```
+
+浏览器默认打开 `http://localhost:8501`。页面按输入检查、模型验证、Gmsh 网格、OpenSeesPy/CalculiX 求解、状态查询和 Markdown/HTML 报告下载顺序操作。上传文件只写入 `CIVILFEM_PROJECT_ROOT` 下的 `.civilfem/uploads/`，GUI 不接受 shell 命令。
 
 ## MCP Server
 
@@ -103,6 +117,8 @@ mcp_server.py              MCP 协议入口
 pyproject.toml             Python 包和可选依赖
 ```
 
+`gui.py` 提供中文 Streamlit Web GUI；运行 `streamlit run gui.py` 即可打开浏览器控制台。
+
 ## 运行产物
 
 每次任务写入配置项目根下的：
@@ -124,6 +140,8 @@ pyproject.toml             Python 包和可选依赖
 - [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)：工具协议
 
 各组件按其自身许可证使用。部署或再分发二进制文件前，请分别核对第三方许可证。
+
+[Streamlit](https://streamlit.io/) 用于中文 Web GUI。
 
 ## 限制
 
