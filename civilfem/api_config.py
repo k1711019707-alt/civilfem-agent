@@ -53,9 +53,10 @@ def _read_file(path: str | Path | None) -> dict[str, Any]:
 
 def load_api_config() -> ApiConfig:
     """环境变量优先；外部文件仅作本机运行时回退。"""
-    configured_path = os.getenv("CIVILFEM_API_CONFIG")
-    fallback_path = Path(r"LOCAL_APP_CONFIG_PATH")
-    file_data = _read_file(configured_path or (fallback_path if fallback_path.is_file() else None))
+    # 仓库不携带任何 URL 或密钥；默认配置保存在用户本机应用数据目录。
+    local_root = os.getenv("LOCALAPPDATA")
+    local_config = Path(local_root) / "CivilFEM" / "api_config.json" if local_root else None
+    file_data = _read_file(os.getenv("CIVILFEM_API_CONFIG") or local_config)
 
     def get(name: str, key: str, default: str = "") -> str:
         return str(os.getenv(name) or file_data.get(key) or default).strip()

@@ -32,6 +32,16 @@ def test_config_environment_precedes_file_and_redacts(monkeypatch, tmp_path):
     assert config.redacted()["responses_enabled"] is True
 
 
+def test_config_uses_user_local_appdata_when_explicit_path_is_absent(monkeypatch, tmp_path):
+    config_dir = tmp_path / "CivilFEM"
+    config_dir.mkdir()
+    (config_dir / "api_config.json").write_text(json.dumps({"responses_url": "https://local.example", "responses_key": "local-secret"}), encoding="utf-8")
+    monkeypatch.delenv("CIVILFEM_API_CONFIG", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    config = load_api_config()
+    assert config.responses_url == "https://local.example"
+
+
 def test_explain_result_uses_responses_endpoint_without_leaking_key():
     seen = {}
 

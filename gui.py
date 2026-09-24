@@ -21,7 +21,7 @@ from civilfem.mcp_api import (
 )
 from civilfem.runtime import capabilities
 from civilfem.security import configured_project_root
-from civilfem.visualization import render_mesh
+from civilfem.visualization import render_cad_preview, render_mesh
 from civilfem.workflow import extract_structural_model, inspect_input, validate_structural_model
 
 
@@ -105,6 +105,22 @@ def build_cad_model(geometry: dict[str, Any], parameters: dict[str, Any]) -> dic
         return {"status": "invalid", "error": f"CAD 参数无效: {error}"}
     # 返回真实验证状态和模型。
     return {"status": "valid" if validation.get("status") == "valid" else "pending_confirmation", "validation": validation, "model": model.model_dump(mode="json"), "error": None}
+
+
+def cad_geometry_state(inspection: dict[str, Any], mapping: str = "unmapped") -> dict[str, Any]:
+    """保留 CAD 几何状态；未显式映射时禁止伪造结构模型。"""
+    if inspection.get("status") != "inspected":
+        return {"status": "failed", "geometry_status": "invalid", "mapping_status": "blocked", "geometry": inspection, "model": None, "error": inspection.get("issues") or "CAD 几何检查失败"}
+    if mapping != "steel_beam":
+        return {
+            "status": "pending_confirmation",
+            "geometry_status": "inspected",
+            "mapping_status": "not_selected",
+            "geometry": inspection,
+            "model": None,
+            "error": "CAD 几何已识别，但尚未映射为受支持的结构模型；当前不会生成钢梁结果。",
+        }
+    return {"status": "mapping_required", "geometry_status": "inspected", "mapping_status": "steel_beam", "geometry": inspection, "model": None, "error": None}
 
 
 def reuse_cad_confirmation(previous_hash: str | None, current_hash: str, inspection: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -351,13 +367,22 @@ def _main_v2() -> None:
     st.markdown("""
     <style>
     .stApp { background: #08111f; color: #e6edf7; }
-    .block-container { max-width: 1600px; padding-top: 1.1rem; }
+    .block-container { max-width: 2048px; padding: 0.55rem 1rem 0.8rem; }
     [data-testid="stHeader"] { background: rgba(8,17,31,.95); }
     [data-testid="stMetric"] { background: #101d30; border: 1px solid #24415f; border-radius: 10px; padding: 12px; }
     [data-testid="stVerticalBlockBorderWrapper"] { background: #0d1a2b; border-color: #24415f; border-radius: 12px; }
-    .hero { padding: 18px 22px; border: 1px solid #28567b; border-radius: 14px; background: linear-gradient(120deg,#0c2238,#102a43); }
+    .hero { padding: 10px 16px; border: 1px solid #294764; border-radius: 8px; background: #0b1727; }
+    .topbar { display:flex; align-items:center; height:58px; gap:18px; border-bottom:1px solid #294764; margin-bottom:10px; }
+    .brand { color:#f2f7ff; font-size:1.35rem; font-weight:700; letter-spacing:.02em; white-space:nowrap; }
+    .brand-mark { color:#218bff; font-size:1.55rem; margin-right:8px; }
+    .topmeta { color:#a9bfd6; border-left:1px solid #294764; padding-left:18px; font-size:.86rem; white-space:nowrap; }
+    .topmeta b { color:#45a7ff; font-weight:600; }
+    .status-dot { color:#55d36d; font-size:1rem; }
+    .civfem-timeline { margin-top:12px; padding:13px 20px; border:1px solid #294764; background:#0b1727; color:#8ea5bd; display:flex; justify-content:space-between; font-size:.83rem; }
+    .civfem-timeline .done, .civfem-timeline .active { color:#39a5ff; }
+    .civfem-timeline .active { color:#f5c451; }
     .eyebrow { color:#62d8ff; font-size:.78rem; letter-spacing:.16em; text-transform:uppercase; }
-    .step { color:#a7bad0; padding:10px 6px; border-bottom:2px solid #29445e; }
+    .step { color:#a7bad0; padding:12px 8px; border-bottom:1px solid #29445e; font-size:.93rem; }
     .step.active { color:#70e4ff; border-color:#23b6e6; }
     .muted { color:#8ea5bd; font-size:.82rem; }
     </style>
@@ -365,15 +390,17 @@ def _main_v2() -> None:
 
     project_root = configured_project_root()
     api_config = load_api_config()
-    with st.container(border=True):
-        st.markdown('<div class="eyebrow">CIVILFEM / ENGINEERING WORKSPACE</div>', unsafe_allow_html=True)
-        st.title("结构有限元工程控制台")
-        st.caption("输入检查 → 参数确认 → 网格生成 → 三维求解 → 专业报告")
-        top = st.columns(4)
-        top[0].metric("项目", Path(project_root).name or "CivilFEM")
-        top[1].metric("模型", "等待上传" if "inspection" not in st.session_state else "已载入")
-        top[2].metric("求解状态", (st.session_state.get("run") or {}).get("status", "未开始"))
-        top[3].metric("API 助手", "已配置" if api_config.responses_enabled else "未配置")
+    run_state = st.session_state.get("run") or {}
+    model_name = st.session_state.get("uploaded_name", "未载入")
+    solve_state = run_state.get("status", "未开始")
+    st.markdown(f'''<div class="topbar">
+      <div class="brand"><span class="brand-mark">⬡</span>CivilFEM</div>
+      <div class="topmeta">项目：<b>{Path(project_root).name or "CivilFEM"}</b></div>
+      <div class="topmeta">模型：<b>{model_name}</b></div>
+      <div class="topmeta">求解状态：<span class="status-dot">●</span> <b>{solve_state}</b></div>
+      <div class="topmeta">网格质量：<b>{(run_state.get("result") or {}).get("quality", {}).get("mesh_element_type", "待生成")}</b></div>
+      <div class="topmeta">运行时间：<b>{run_state.get("elapsed", "—")}</b></div>
+    </div>''', unsafe_allow_html=True)
 
     left, center, right = st.columns([1.05, 2.3, 1.1], gap="medium")
     with left:
@@ -384,13 +411,8 @@ def _main_v2() -> None:
             st.caption("后端能力")
             available = [name for name, enabled in capabilities().items() if enabled]
             st.write("、".join(available) if available else "未检测到可用后端")
-        with st.container(border=True):
-            st.subheader("API 配置")
-            st.caption("仅显示脱敏状态；密钥不写入报告或 Git。")
-            status = api_config.redacted()
-            st.write(f"Responses：{'已连接配置' if status['responses_enabled'] else '未配置'}")
-            st.write(f"FHL Images：{'已连接配置' if status['fhl_enabled'] else '未配置'}")
-            st.caption(f"模型：{status['responses_model']}")
+        st.caption("工程后端")
+        st.caption(" · ".join(name for name, enabled in capabilities().items() if enabled) or "未检测到")
 
     with center:
         uploaded = st.file_uploader("上传结构 JSON 或 DXF 图纸", type=["json", "dxf"])
@@ -398,7 +420,13 @@ def _main_v2() -> None:
             st.info("请上传模型文件以开始工程流程。", icon=":material/upload_file:")
             return
         raw = uploaded.getvalue()
+        st.session_state["uploaded_name"] = uploaded.name
         upload_hash = hashlib.sha256(raw).hexdigest()
+        if st.session_state.get("upload_hash") != upload_hash:
+            for key in ("mesh", "run", "inspection", "cad_inspection", "cad_input_hash"):
+                st.session_state.pop(key, None)
+            st.session_state["upload_hash"] = upload_hash
+            st.session_state["cad_mapping"] = "仅查看 CAD 几何"
         try:
             input_path = save_upload(raw, uploaded.name, project_root)
         except Exception as error:
@@ -408,14 +436,25 @@ def _main_v2() -> None:
             cad_inspection = inspect_input(str(input_path), str(project_root))
             st.subheader("CAD 几何摘要")
             c1, c2, c3 = st.columns(3)
-            c1.metric("实体数量", cad_inspection.get("entity_count", 0))
+            c1.metric("实体数量", cad_inspection.get("count", 0))
             c2.metric("图层数量", len(cad_inspection.get("layers", [])))
             c3.metric("线段长度", f"{float(cad_inspection.get('line_length') or 0):,.2f} mm")
+            preview = render_cad_preview(input_path)
+            if preview.get("status") == "completed":
+                st.image(preview["image"], caption="CAD 几何预览（原始图纸）", width="stretch")
             if cad_inspection.get("status") != "inspected":
                 st.error(cad_inspection.get("issues") or "DXF 检查失败")
                 return
+            mapping = st.selectbox("分析映射", ["仅查看 CAD 几何", "H 型钢梁映射"], key="cad_mapping", help="复杂图纸不会自动变成钢梁；只有明确选择映射后才会进入 FEM。")
+            if mapping == "仅查看 CAD 几何":
+                geometry_state = cad_geometry_state(cad_inspection)
+                st.session_state["inspection"] = geometry_state
+                st.info(geometry_state["error"], icon=":material/info:")
+                st.caption(f"图元类型：{', '.join(cad_inspection.get('entity_types', [])) or '未识别'}")
+                st.caption(f"图层：{', '.join(cad_inspection.get('layers', [])) or '未识别'}")
+                return
             inspection = reuse_cad_confirmation(st.session_state.get("cad_input_hash"), upload_hash, st.session_state.get("cad_inspection"))
-            if inspection is None:
+            if inspection is None or inspection.get("mapping") != "steel_beam":
                 with st.form("cad_parameters", border=True):
                     st.subheader("确认工程参数")
                     p1, p2 = st.columns(2)
@@ -430,6 +469,7 @@ def _main_v2() -> None:
                 if not confirmed:
                     return
                 inspection = build_cad_model({"project_id": input_path.stem, "length": length}, {"id": cad_id, "h": h, "b": b, "tw": tw, "tf": tf, "steel": steel, "length": length})
+                inspection["mapping"] = "steel_beam"
                 if inspection.get("status") == "valid":
                     st.session_state.update(cad_input_hash=upload_hash, cad_inspection=inspection)
         else:
@@ -484,6 +524,13 @@ def _main_v2() -> None:
                 report_path = report.get("report")
                 if report_path and Path(report_path).is_file():
                     st.download_button(f"下载 {fmt.upper()} 报告", Path(report_path).read_bytes(), file_name=Path(report_path).name, mime="text/markdown" if fmt == "markdown" else "text/html")
+
+    st.markdown("""
+    <div class="civfem-timeline">
+      <span class="done">● 模型检查</span><span class="done">● 网格生成</span>
+      <span class="active">● 求解</span><span>○ 后处理</span><span>○ 已完成</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

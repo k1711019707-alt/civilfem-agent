@@ -6,6 +6,49 @@ from pathlib import Path
 from typing import Any
 
 
+def render_cad_preview(dxf_path: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+    """将 DXF 原始二维几何渲染为深色预览，不推断结构语义。"""
+    source = Path(dxf_path).resolve()
+    if not source.is_file():
+        return {"status": "failed", "error": f"DXF 文件不存在: {source}"}
+    target = Path(output_path).resolve() if output_path else source.with_name(f"{source.stem}_cad_preview.png")
+    try:
+        target.relative_to(source.parent)
+    except ValueError:
+        return {"status": "failed", "error": "CAD 预览路径必须位于图纸目录内"}
+    try:
+        import ezdxf
+        import matplotlib.pyplot as plt
+    except ImportError as error:
+        return {"status": "not_implemented", "error": f"缺少 CAD 预览依赖: {error}"}
+    document = ezdxf.readfile(str(source))
+    fig, axis = plt.subplots(figsize=(12, 7), facecolor="#08111f")
+    axis.set_facecolor("#08111f")
+    entity_count = 0
+    for entity in document.modelspace():
+        kind = entity.dxftype()
+        points: list[tuple[float, float]] = []
+        if kind == "LINE":
+            points = [(float(entity.dxf.start.x), float(entity.dxf.start.y)), (float(entity.dxf.end.x), float(entity.dxf.end.y))]
+        elif kind == "LWPOLYLINE":
+            points = [(float(point[0]), float(point[1])) for point in entity.get_points("xy")]
+            if entity.closed and points:
+                points.append(points[0])
+        elif kind == "POLYLINE":
+            points = [(float(vertex.dxf.location.x), float(vertex.dxf.location.y)) for vertex in entity.vertices]
+            if entity.is_closed and points:
+                points.append(points[0])
+        if len(points) >= 2:
+            axis.plot([point[0] for point in points], [point[1] for point in points], color="#39a5ff", linewidth=0.8)
+            entity_count += 1
+    axis.set_aspect("equal", adjustable="datalim")
+    axis.axis("off")
+    fig.tight_layout(pad=0.3)
+    fig.savefig(target, dpi=140, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
+    return {"status": "completed", "image": str(target), "rendered_entities": entity_count}
+
+
 def render_mesh(mesh_path: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     """将 Gmsh 网格渲染为 PNG。"""
     # 解析输入网格路径。
@@ -44,6 +87,7 @@ def render_mesh(mesh_path: str | Path, output_path: str | Path | None = None) ->
     grid = pv.UnstructuredGrid(cells, np.full(len(connectivity), cell_type), mesh.points)
     # 创建离屏绘图器。
     plotter = pv.Plotter(off_screen=True, window_size=(1280, 720))
+    plotter.set_background("#08111f")
     # 添加网格和边线。
     plotter.add_mesh(grid, color="steelblue", show_edges=True)
     # 使用等轴测视角。
@@ -83,7 +127,8 @@ def render_stress_cloud(mesh_path: str | Path, von_mises: dict[int, float], outp
     values = np.array([float(von_mises.get(index + 1, 0.0)) for index in range(grid.n_points)])
     grid.point_data["von Mises (MPa)"] = values
     plotter = pv.Plotter(off_screen=True, window_size=(1400, 900))
-    plotter.add_mesh(grid, scalars="von Mises (MPa)", cmap="turbo", show_edges=False, smooth_shading=True, scalar_bar_args={"title": "von Mises (MPa)"})
+    plotter.set_background("#08111f")
+    plotter.add_mesh(grid, scalars="von Mises (MPa)", cmap="turbo", show_edges=True, edge_color="#1b3550", smooth_shading=True, scalar_bar_args={"title": "von Mises (MPa)", "color": "white"})
     plotter.view_isometric()
     plotter.reset_camera()
     plotter.show(screenshot=str(target), auto_close=True)

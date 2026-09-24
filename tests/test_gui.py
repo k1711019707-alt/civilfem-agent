@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from gui import inspect_uploaded_model, parse_json_upload, reuse_cad_confirmation, save_upload
+from gui import cad_geometry_state, inspect_uploaded_model, parse_json_upload, reuse_cad_confirmation, save_upload
 
 
 @pytest.fixture(autouse=True)
@@ -63,3 +63,19 @@ def test_reuse_cad_confirmation_after_form_submit():
     confirmed = {"status": "valid", "model": {"project_id": "cad"}}
     assert reuse_cad_confirmation("same", "same", confirmed) == confirmed
     assert reuse_cad_confirmation("old", "same", confirmed) is None
+
+
+def test_complex_cad_geometry_is_not_silently_converted_to_steel_beam():
+    geometry = {
+        "status": "inspected",
+        "format": "dxf",
+        "count": 153,
+        "layers": ["A-WALL", "A-TEXT"],
+        "entity_types": ["LINE", "LWPOLYLINE", "TEXT"],
+        "bounds": [0.0, 0.0, 1000.0, 800.0],
+    }
+    state = cad_geometry_state(geometry)
+    assert state["status"] == "pending_confirmation"
+    assert state["mapping_status"] == "not_selected"
+    assert state["model"] is None
+    assert "钢梁" in state["error"]

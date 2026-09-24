@@ -14,7 +14,7 @@ from civilfem.inputs import inspect_asset, allowed_path
 from civilfem.runtime import create_run, load_run
 from civilfem.reports import generate_report
 from civilfem.mcp_api import build_mesh, submit_simulation, get_result_summary
-from civilfem.visualization import render_mesh, render_stress_cloud
+from civilfem.visualization import render_cad_preview, render_mesh, render_stress_cloud
 from gui import build_cad_model
 
 
@@ -115,6 +115,20 @@ def test_dxf_asset_inspection_returns_geometry_summary(tmp_path):
     assert result["layers"] == ["BEAM"]
     assert result["bounds"] == [0.0, 0.0, 100.0, 50.0]
     assert result["line_length"] == pytest.approx(150.0)
+
+
+def test_dxf_preview_preserves_geometry_without_structural_mapping(tmp_path):
+    import ezdxf
+    document = ezdxf.new("R2010")
+    space = document.modelspace()
+    space.add_line((0, 0), (100, 0), dxfattribs={"layer": "BEAMS"})
+    space.add_line((100, 0), (100, 80), dxfattribs={"layer": "COLUMNS"})
+    path = tmp_path / "plan.dxf"
+    document.saveas(path)
+    preview = render_cad_preview(path)
+    assert preview["status"] == "completed"
+    assert preview["rendered_entities"] == 2
+    assert Path(preview["image"]).is_file()
 
 
 def test_cad_model_requires_explicit_engineering_parameters():

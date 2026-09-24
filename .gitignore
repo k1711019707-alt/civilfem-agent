@@ -10,6 +10,11 @@ dist/
 
 # 本地环境和敏感配置
 .env
+*.env
+gui_api_config.json
+gui_settings.json
+*secrets*.json
+.streamlit/secrets.toml
 .venv/
 env/
 
