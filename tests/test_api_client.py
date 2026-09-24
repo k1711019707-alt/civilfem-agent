@@ -40,10 +40,22 @@ def test_explain_result_uses_responses_endpoint_without_leaking_key():
         seen["auth"] = request.get_header("Authorization")
         return FakeResponse({"output_text": "结果仅供工程师复核。"})
 
-    text = explain_result(ApiConfig("https://api.example", "secret-key", "model"), {"max_von_mises": 12}, opener=opener)
+    text = explain_result(ApiConfig("https://api.openai.com", "secret-key", "model"), {"max_von_mises": 12}, opener=opener)
     assert text.startswith("结果")
     assert seen["url"].endswith("/v1/responses")
     assert seen["auth"] == "Bearer secret-key"
+
+
+def test_explain_result_uses_chat_completions_for_compatible_gateway():
+    seen = {}
+
+    def opener(request, timeout):
+        seen["url"] = request.full_url
+        return FakeResponse({"choices": [{"message": {"content": "兼容网关结果。"}}]})
+
+    text = explain_result(ApiConfig("https://gateway.example.test", "secret-key", "gpt-5.6-sol"), {"max_von_mises": 12}, opener=opener)
+    assert text == "兼容网关结果。"
+    assert seen["url"].endswith("/v1/chat/completions")
 
 
 def test_image_edit_decodes_base64_and_missing_config_is_safe(tmp_path):
