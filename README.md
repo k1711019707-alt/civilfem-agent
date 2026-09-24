@@ -25,7 +25,18 @@ $env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
 
 ## 使用
 
-### 启动中文 Web 界面
+### 启动本地 PySide6 桌面界面（推荐）
+
+```powershell
+conda activate fangzhen
+$env:CIVILFEM_PROJECT_ROOT = (Get-Location).Path
+$env:CIVILFEM_CALCULIX = "D:\CalculiX\ccx.exe"
+python desktop_gui.py
+```
+
+桌面界面不启动浏览器。图纸、网格、CalculiX、应力云图和 Markdown/HTML 报告均在本机完成。
+
+### 启动中文 Web 兼容界面
 
 ```powershell
 conda activate fangzhen
