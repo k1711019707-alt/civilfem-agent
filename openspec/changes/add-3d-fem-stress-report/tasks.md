@@ -19,4 +19,4 @@
 - [x] 3.1 更新 MCP API 和 Streamlit 页面，验证完成运行显示应力云图、关键指标和报告下载。
 - [x] 3.2 将 `examples/cad_samples` 测试图纸和 README 纳入 Git，并验证文件存在。
 - [x] 3.3 运行全量 pytest、语法检查和本机 CalculiX 集成测试，确认所有测试通过。
-- [ ] 3.4 提交变更并推送 GitHub `origin/main`，验证远程提交哈希与工作区状态。
+- [x] 3.4 提交变更并推送 GitHub `origin/main`，验证远程提交哈希与工作区状态。
