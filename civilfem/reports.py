@@ -25,7 +25,11 @@ def _markdown(manifest: dict[str, Any], result: dict[str, Any] | None = None) ->
     error = manifest.get("error") or "无"
     # 将结果字典格式化为可读 JSON。
     result = result or {}
-    result_text = json.dumps(result, ensure_ascii=False, indent=2)
+    report_result = {key: value for key, value in result.items() if key not in {"displacement", "stress", "von_mises"}}
+    report_result["displacement_node_count"] = len(result.get("displacement") or {})
+    report_result["stress_node_count"] = len(result.get("stress") or {})
+    report_result["von_mises_node_count"] = len(result.get("von_mises") or {})
+    result_text = json.dumps(report_result, ensure_ascii=False, indent=2)
     stress_cloud = result.get("stress_cloud") or {}
     cloud_path = stress_cloud.get("image") or "未生成"
     # 返回固定章节报告。
@@ -46,6 +50,12 @@ def _markdown(manifest: dict[str, Any], result: dict[str, Any] | None = None) ->
 | 最大位移 | {result.get('max_displacement', '未提供')} {result.get('displacement_units', '')} |
 | 最大 von Mises 应力 | {result.get('max_von_mises', '未提供')} {result.get('stress_units', '')} |
 | 应力云图 | `{cloud_path}` |
+
+## 结果质量
+
+- 单元类型：`{(result.get('quality') or {}).get('mesh_element_type', '未提供')}`
+- 网格尺寸：`{(result.get('quality') or {}).get('mesh_size_mm', '未提供')}` mm
+- 质量提示：{(result.get('quality') or {}).get('warning') or '无'}
 
 ## 有限元模型
 

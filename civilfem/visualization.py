@@ -83,7 +83,7 @@ def render_stress_cloud(mesh_path: str | Path, von_mises: dict[int, float], outp
     values = np.array([float(von_mises.get(index + 1, 0.0)) for index in range(grid.n_points)])
     grid.point_data["von Mises (MPa)"] = values
     plotter = pv.Plotter(off_screen=True, window_size=(1400, 900))
-    plotter.add_mesh(grid, scalars="von Mises (MPa)", cmap="turbo", show_edges=True, scalar_bar_args={"title": "von Mises (MPa)"})
+    plotter.add_mesh(grid, scalars="von Mises (MPa)", cmap="turbo", show_edges=False, smooth_shading=True, scalar_bar_args={"title": "von Mises (MPa)"})
     plotter.view_isometric()
     plotter.reset_camera()
     plotter.show(screenshot=str(target), auto_close=True)

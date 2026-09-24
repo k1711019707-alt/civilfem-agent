@@ -15,6 +15,16 @@ from .fem import build_calculix_input, parse_frd_results, run_calculix
 from .visualization import render_stress_cloud
 
 
+def _result_summary(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not result:
+        return result
+    summary = {key: value for key, value in result.items() if key not in {"displacement", "stress", "von_mises"}}
+    summary["displacement_node_count"] = len(result.get("displacement") or {})
+    summary["stress_node_count"] = len(result.get("stress") or {})
+    summary["von_mises_node_count"] = len(result.get("von_mises") or {})
+    return summary
+
+
 def build_mesh(model: dict[str, Any], project_root: str = ".", mesh_size: float = 100.0) -> dict[str, Any]:
     """使用 Gmsh 生成 H 型钢实体网格。"""
     # 读取后端能力，避免伪造网格完成状态。
@@ -61,6 +71,14 @@ def run_fem_analysis(model: dict[str, Any], project_root: str = ".", mesh_path: 
         if execution.get("status") != "completed":
             return save_run(manifest)
         result = parse_frd_results(execution["frd"])
+        component_length = float(component.get("length") or component.get("Lx") or 0.0)
+        mesh_size_value = float(mesh_size)
+        result["quality"] = {
+            "mesh_element_type": "C3D4",
+            "mesh_size_mm": mesh_size_value,
+            "mesh_size_to_length_ratio": mesh_size_value / component_length if component_length else None,
+            "warning": "当前使用线性四面体 C3D4；网格尺寸过大时应力峰值仅作工程辅助参考。" if mesh_size_value / component_length > 0.05 else None,
+        }
         rendered_cloud = render_stress_cloud(mesh_path, result["von_mises"])
         cloud = rendered_cloud
         if rendered_cloud.get("status") == "completed":
@@ -84,7 +102,7 @@ def get_result_summary(run_id: str, project_root: str = ".") -> dict[str, Any]:
     """读取统一结果摘要。"""
     # 读取运行清单，结果解析器接入前只返回真实状态。
     manifest = load_run(run_id, project_root)
-    return {"run_id": run_id, "status": manifest.get("status"), "result": manifest.get("result"), "error": manifest.get("error")}
+    return {"run_id": run_id, "status": manifest.get("status"), "result": _result_summary(manifest.get("result")), "error": manifest.get("error")}
 
 
 def generate_report(run_id: str, project_root: str = ".", fmt: str = "markdown") -> dict[str, Any]:

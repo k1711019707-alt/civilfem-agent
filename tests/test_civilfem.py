@@ -13,7 +13,7 @@ from civilfem.workflow import extract_structural_model, validate_structural_mode
 from civilfem.inputs import inspect_asset, allowed_path
 from civilfem.runtime import create_run, load_run
 from civilfem.reports import generate_report
-from civilfem.mcp_api import build_mesh, submit_simulation
+from civilfem.mcp_api import build_mesh, submit_simulation, get_result_summary
 from civilfem.visualization import render_mesh, render_stress_cloud
 from gui import build_cad_model
 
@@ -181,6 +181,17 @@ def test_professional_report_contains_fem_metrics(tmp_path):
     assert "最大 von Mises 应力" in content
     assert "123.4 MPa" in content
     assert "有限元模型" in content
+
+
+def test_result_summary_does_not_expose_raw_solver_logs_or_arrays(tmp_path):
+    manifest = create_run(tmp_path, "simulation", "abc", "calculix-3d")
+    manifest.update({"status": "completed", "stdout": "long log", "stderr": "long error", "result": {"displacement": {1: [1, 2, 3]}, "stress": {1: [1, 2, 3, 4, 5, 6]}, "von_mises": {1: 5.0}, "max_von_mises": 5.0}})
+    from civilfem.runtime import save_run
+    save_run(manifest)
+    summary = get_result_summary(manifest["run_id"], tmp_path)
+    assert "stdout" not in summary
+    assert "displacement" not in summary["result"]
+    assert summary["result"]["stress_node_count"] == 1
 
 
 def test_gmsh_builds_h_section_mesh(tmp_path):

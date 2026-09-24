@@ -47,7 +47,7 @@ def _wrapped(values: list[int], width: int = 12) -> list[str]:
     return [", ".join(str(value) for value in values[index:index + width]) for index in range(0, len(values), width)]
 
 
-def build_calculix_input(mesh: dict[str, Any], output_path: str | Path, *, youngs_modulus: float = 206000.0, poisson_ratio: float = 0.3, load: tuple[float, float, float] = (0.0, 0.0, 0.0), moment_x: float = 0.0) -> Path:
+def build_calculix_input(mesh: dict[str, Any], output_path: str | Path, *, youngs_modulus: float = 206000.0, poisson_ratio: float = 0.3, load: tuple[float, float, float] = (0.0, 0.0, 0.0), moment_x: float = 0.0, moment_y: float = 0.0, moment_z: float = 0.0) -> Path:
     """将 meshio 风格网格写为可执行的 CalculiX 输入文件。"""
     nodes, elements = _mesh_lines(mesh)
     element_type = "C3D10" if len(elements[0].split(",")) == 11 else "C3D4"
@@ -74,14 +74,17 @@ def build_calculix_input(mesh: dict[str, Any], output_path: str | Path, *, young
         for dof, value in enumerate(load, 1):
             if value:
                 lines.append(f"{node}, {dof}, {value / len(loaded):.12g}")
-    if moment_x:
-        z_values = {node: float(points[node - 1][2]) for node in loaded}
-        mean_z = sum(z_values.values()) / len(z_values)
-        denominator = sum((z - mean_z) ** 2 for z in z_values.values())
-        if denominator <= 0:
-            raise ValueError("加载端节点无法形成 X 轴弯矩力偶")
-        for node, z in z_values.items():
-            lines.append(f"{node}, 2, {-moment_x * (z - mean_z) / denominator:.12g}")
+    coordinates = {node: tuple(float(value) for value in points[node - 1]) for node in loaded}
+    mean_y = sum(point[1] for point in coordinates.values()) / len(coordinates)
+    mean_z = sum(point[2] for point in coordinates.values()) / len(coordinates)
+    denom_y = sum((point[1] - mean_y) ** 2 for point in coordinates.values())
+    denom_z = sum((point[2] - mean_z) ** 2 for point in coordinates.values())
+    if moment_x and (denom_y <= 0 or denom_z <= 0):
+        raise ValueError("加载端节点无法形成 X 轴弯矩力偶")
+    for node, (_, y, z) in coordinates.items():
+        if moment_x:
+            lines.append(f"{node}, 2, {-moment_x * (z - mean_z) / (2 * denom_z):.12g}")
+            lines.append(f"{node}, 3, {moment_x * (y - mean_y) / (2 * denom_y):.12g}")
     lines += ["*NODE FILE", "U", "*EL FILE", "S", "*END STEP", ""]
     target = Path(output_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +103,7 @@ def run_calculix(input_path: str | Path, executable: str | None = None, timeout:
         return {"status": "failed", "error": f"CalculiX 执行失败: {error}"}
     frd = source.with_suffix(".frd")
     status = "completed" if completed.returncode == 0 and frd.is_file() else "failed"
-    result = {"status": status, "returncode": completed.returncode, "stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:], "frd": str(frd) if frd.is_file() else None}
+    result = {"status": status, "returncode": completed.returncode, "stdout_tail": completed.stdout[-1000:], "stderr_tail": completed.stderr[-1000:], "frd": str(frd) if frd.is_file() else None}
     if status != "completed":
         result["error"] = "CalculiX 未生成有效 .frd 结果"
     return result

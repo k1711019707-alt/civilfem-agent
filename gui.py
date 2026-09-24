@@ -300,7 +300,16 @@ def main() -> None:
     run = st.session_state.get("run")
     if not run:
         return
-    _show_json(st, "运行状态", run)
+    run_view = {key: value for key, value in run.items() if key not in {"stdout", "stderr", "result"}}
+    result_view = run.get("result") or {}
+    if result_view:
+        run_view["result_summary"] = {key: value for key, value in result_view.items() if key not in {"displacement", "stress", "von_mises"}}
+        run_view["result_summary"].update({
+            "displacement_node_count": len(result_view.get("displacement") or {}),
+            "stress_node_count": len(result_view.get("stress") or {}),
+            "von_mises_node_count": len(result_view.get("von_mises") or {}),
+        })
+    _show_json(st, "运行摘要", run_view)
     fem_result = run.get("result") or {}
     cloud = (fem_result.get("stress_cloud") or {}).get("image")
     if cloud and Path(cloud).is_file():
@@ -310,6 +319,9 @@ def main() -> None:
         metric_a, metric_b = st.columns(2)
         metric_a.metric("最大 von Mises 应力", f"{fem_result['max_von_mises']:.3f} MPa")
         metric_b.metric("最大位移", f"{fem_result['max_displacement']:.6f} mm")
+    quality_warning = (fem_result.get("quality") or {}).get("warning")
+    if quality_warning:
+        st.warning(quality_warning)
     if run.get("status") in {"failed", "not_implemented", "pending_confirmation"}:
         st.error(run.get("error") or "求解未完成")
         return

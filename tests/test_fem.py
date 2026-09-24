@@ -21,6 +21,17 @@ def test_build_calculix_input_contains_3d_model_sections(tmp_path):
     assert "*STATIC" in text
 
 
+def test_build_calculix_input_distributes_bending_couple_in_two_directions(tmp_path):
+    mesh = {
+        "points": [[0, -1, -1], [0, 1, -1], [0, 0, 1], [1, -1, -1], [1, 1, -1], [1, 0, 1], [1, -1, 1], [1, 1, 1]],
+        "cells": [{"type": "tetra", "data": [[0, 1, 2, 3], [3, 4, 5, 6]]}],
+    }
+    inp = build_calculix_input(mesh, tmp_path / "beam.inp", moment_x=1000)
+    text = inp.read_text(encoding="ascii")
+    assert ", 2, " in text
+    assert ", 3, " in text
+
+
 def test_parse_frd_results_extracts_displacement_and_stress(tmp_path):
     frd = tmp_path / "beam.frd"
     frd.write_text(
