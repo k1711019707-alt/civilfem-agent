@@ -337,5 +337,154 @@ def main() -> None:
             st.download_button(f"下载 {fmt.upper()} 报告", Path(report_path).read_bytes(), file_name=Path(report_path).name, mime="text/markdown" if fmt == "markdown" else "text/html")
 
 
-if __name__ == "__main__":
+if False and __name__ == "__main__":
     main()
+
+
+def _main_v2() -> None:
+    """简体中文深色工程控制台。"""
+    import streamlit as st
+    from civilfem.api_client import ApiClientError, explain_result
+    from civilfem.api_config import load_api_config
+
+    st.set_page_config(page_title="CivilFEM 工程控制台", page_icon=":material/analytics:", layout="wide")
+    st.markdown("""
+    <style>
+    .stApp { background: #08111f; color: #e6edf7; }
+    .block-container { max-width: 1600px; padding-top: 1.1rem; }
+    [data-testid="stHeader"] { background: rgba(8,17,31,.95); }
+    [data-testid="stMetric"] { background: #101d30; border: 1px solid #24415f; border-radius: 10px; padding: 12px; }
+    [data-testid="stVerticalBlockBorderWrapper"] { background: #0d1a2b; border-color: #24415f; border-radius: 12px; }
+    .hero { padding: 18px 22px; border: 1px solid #28567b; border-radius: 14px; background: linear-gradient(120deg,#0c2238,#102a43); }
+    .eyebrow { color:#62d8ff; font-size:.78rem; letter-spacing:.16em; text-transform:uppercase; }
+    .step { color:#a7bad0; padding:10px 6px; border-bottom:2px solid #29445e; }
+    .step.active { color:#70e4ff; border-color:#23b6e6; }
+    .muted { color:#8ea5bd; font-size:.82rem; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    project_root = configured_project_root()
+    api_config = load_api_config()
+    with st.container(border=True):
+        st.markdown('<div class="eyebrow">CIVILFEM / ENGINEERING WORKSPACE</div>', unsafe_allow_html=True)
+        st.title("结构有限元工程控制台")
+        st.caption("输入检查 → 参数确认 → 网格生成 → 三维求解 → 专业报告")
+        top = st.columns(4)
+        top[0].metric("项目", Path(project_root).name or "CivilFEM")
+        top[1].metric("模型", "等待上传" if "inspection" not in st.session_state else "已载入")
+        top[2].metric("求解状态", (st.session_state.get("run") or {}).get("status", "未开始"))
+        top[3].metric("API 助手", "已配置" if api_config.responses_enabled else "未配置")
+
+    left, center, right = st.columns([1.05, 2.3, 1.1], gap="medium")
+    with left:
+        with st.container(border=True):
+            st.subheader("工作流")
+            for label, active in (("01  CAD 导入", True), ("02  参数确认", False), ("03  网格生成", False), ("04  三维求解", False), ("05  报告输出", False)):
+                st.markdown(f'<div class="step {"active" if active else ""}">{label}</div>', unsafe_allow_html=True)
+            st.caption("后端能力")
+            available = [name for name, enabled in capabilities().items() if enabled]
+            st.write("、".join(available) if available else "未检测到可用后端")
+        with st.container(border=True):
+            st.subheader("API 配置")
+            st.caption("仅显示脱敏状态；密钥不写入报告或 Git。")
+            status = api_config.redacted()
+            st.write(f"Responses：{'已连接配置' if status['responses_enabled'] else '未配置'}")
+            st.write(f"FHL Images：{'已连接配置' if status['fhl_enabled'] else '未配置'}")
+            st.caption(f"模型：{status['responses_model']}")
+
+    with center:
+        uploaded = st.file_uploader("上传结构 JSON 或 DXF 图纸", type=["json", "dxf"])
+        if uploaded is None:
+            st.info("请上传模型文件以开始工程流程。", icon=":material/upload_file:")
+            return
+        raw = uploaded.getvalue()
+        upload_hash = hashlib.sha256(raw).hexdigest()
+        try:
+            input_path = save_upload(raw, uploaded.name, project_root)
+        except Exception as error:
+            st.error(f"上传文件保存失败：{error}")
+            return
+        if input_path.suffix.lower() == ".dxf":
+            cad_inspection = inspect_input(str(input_path), str(project_root))
+            st.subheader("CAD 几何摘要")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("实体数量", cad_inspection.get("entity_count", 0))
+            c2.metric("图层数量", len(cad_inspection.get("layers", [])))
+            c3.metric("线段长度", f"{float(cad_inspection.get('line_length') or 0):,.2f} mm")
+            if cad_inspection.get("status") != "inspected":
+                st.error(cad_inspection.get("issues") or "DXF 检查失败")
+                return
+            inspection = reuse_cad_confirmation(st.session_state.get("cad_input_hash"), upload_hash, st.session_state.get("cad_inspection"))
+            if inspection is None:
+                with st.form("cad_parameters", border=True):
+                    st.subheader("确认工程参数")
+                    p1, p2 = st.columns(2)
+                    cad_id = p1.text_input("构件编号", value="CAD-B-1")
+                    steel = p2.text_input("钢材牌号", value="Q355")
+                    h = p1.number_input("截面高度 h（mm）", min_value=0.1, value=300.0)
+                    b = p2.number_input("翼缘宽度 b（mm）", min_value=0.1, value=300.0)
+                    tw = p1.number_input("腹板厚度 tw（mm）", min_value=0.1, value=10.0)
+                    tf = p2.number_input("翼缘厚度 tf（mm）", min_value=0.1, value=15.0)
+                    length = st.number_input("构件长度（mm）", min_value=0.1, value=6000.0)
+                    confirmed = st.form_submit_button("确认参数并建立模型", type="primary")
+                if not confirmed:
+                    return
+                inspection = build_cad_model({"project_id": input_path.stem, "length": length}, {"id": cad_id, "h": h, "b": b, "tw": tw, "tf": tf, "steel": steel, "length": length})
+                if inspection.get("status") == "valid":
+                    st.session_state.update(cad_input_hash=upload_hash, cad_inspection=inspection)
+        else:
+            inspection = inspect_uploaded_model(input_path, project_root)
+        st.session_state["inspection"] = inspection
+        if inspection.get("status") != "valid":
+            st.error(inspection.get("error") or "模型未通过验证")
+            return
+        model = inspection["model"]
+        st.success("模型验证通过，可生成网格并提交三维求解。", icon=":material/check_circle:")
+        with st.container(border=True):
+            st.subheader("网格与求解")
+            mesh_size = st.number_input("网格尺寸（mm）", min_value=0.1, value=100.0, step=10.0)
+            b1, b2 = st.columns(2)
+            if b1.button("生成 Gmsh 网格", type="primary"):
+                with st.spinner("正在生成网格和预览…"):
+                    st.session_state["mesh"] = create_mesh(model, project_root, mesh_size)
+            if b2.button("运行三维 FEM", type="primary"):
+                with st.spinner("正在调用 CalculiX…"):
+                    st.session_state["run"] = run_fem_analysis(model, str(project_root), (st.session_state.get("mesh") or {}).get("mesh"), mesh_size)
+        mesh = st.session_state.get("mesh") or {}
+        if mesh.get("preview", {}).get("image"):
+            st.image(mesh["preview"]["image"], caption="网格预览", width="stretch")
+        run = st.session_state.get("run") or {}
+        result = run.get("result") or {}
+        cloud = (result.get("stress_cloud") or {}).get("image")
+        if cloud and Path(cloud).is_file():
+            st.subheader("von Mises 等效应力云图")
+            st.image(cloud, caption="von Mises 应力（MPa）", width="stretch")
+        if run.get("status") in {"failed", "not_implemented", "pending_confirmation"}:
+            st.error(run.get("error") or "求解未完成")
+
+    with right:
+        st.subheader("结果摘要")
+        result = (st.session_state.get("run") or {}).get("result") or {}
+        st.metric("最大 von Mises", f"{result.get('max_von_mises', 0):.3f} MPa" if result else "—")
+        st.metric("最大位移", f"{result.get('max_displacement', 0):.6f} mm" if result else "—")
+        st.metric("节点数量", result.get("node_count", len(result.get("displacement", {}))) if result else "—")
+        st.metric("单元数量", result.get("element_count", "—") if result else "—")
+        with st.expander("AI 工程分析", icon=":material/auto_awesome:"):
+            st.caption("AI 仅提供辅助解释，不替代工程师复核，不修改 FEM 数值。")
+            if st.button("生成结果解释"):
+                try:
+                    st.write(explain_result(api_config, {k: result.get(k) for k in ("max_von_mises", "max_displacement", "quality")},))
+                except ApiClientError as error:
+                    st.warning(str(error))
+        run_id = (st.session_state.get("run") or {}).get("run_id")
+        if run_id:
+            reports = build_reports(run_id, project_root)
+            st.subheader("报告输出")
+            for fmt, report in reports.items():
+                report_path = report.get("report")
+                if report_path and Path(report_path).is_file():
+                    st.download_button(f"下载 {fmt.upper()} 报告", Path(report_path).read_bytes(), file_name=Path(report_path).name, mime="text/markdown" if fmt == "markdown" else "text/html")
+
+
+if __name__ == "__main__":
+    _main_v2()
