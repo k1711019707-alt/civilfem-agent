@@ -54,3 +54,37 @@ def render_mesh(mesh_path: str | Path, output_path: str | Path | None = None) ->
     plotter.show(screenshot=str(target), auto_close=True)
     # 返回截图资产。
     return {"status": "completed", "image": str(target), "cell_count": grid.n_cells, "point_count": grid.n_points}
+
+
+def render_stress_cloud(mesh_path: str | Path, von_mises: dict[int, float], output_path: str | Path | None = None) -> dict[str, Any]:
+    """将节点 von Mises 应力渲染为 PNG 云图。"""
+    source = Path(mesh_path).resolve()
+    if not source.is_file():
+        return {"status": "failed", "error": f"网格不存在: {source}"}
+    target = Path(output_path).resolve() if output_path else source.with_name("stress_cloud.png")
+    try:
+        target.relative_to(source.parent)
+    except ValueError:
+        return {"status": "failed", "error": "云图路径必须位于网格目录内"}
+    try:
+        import meshio
+        import numpy as np
+        import pyvista as pv
+    except ImportError as error:
+        return {"status": "not_implemented", "error": f"缺少可视化依赖: {error}"}
+    mesh = meshio.read(source)
+    tetrahedra = [block.data for block in mesh.cells if block.type in {"tetra", "tetra10"}]
+    if not tetrahedra:
+        return {"status": "failed", "error": "网格不含四面体单元"}
+    connectivity = np.vstack(tetrahedra)
+    cells = np.hstack([np.full((len(connectivity), 1), connectivity.shape[1]), connectivity]).ravel()
+    cell_type = pv.CellType.TETRA if connectivity.shape[1] == 4 else pv.CellType.QUADRATIC_TETRA
+    grid = pv.UnstructuredGrid(cells, np.full(len(connectivity), cell_type), mesh.points)
+    values = np.array([float(von_mises.get(index + 1, 0.0)) for index in range(grid.n_points)])
+    grid.point_data["von Mises (MPa)"] = values
+    plotter = pv.Plotter(off_screen=True, window_size=(1400, 900))
+    plotter.add_mesh(grid, scalars="von Mises (MPa)", cmap="turbo", show_edges=True, scalar_bar_args={"title": "von Mises (MPa)"})
+    plotter.view_isometric()
+    plotter.reset_camera()
+    plotter.show(screenshot=str(target), auto_close=True)
+    return {"status": "completed", "image": str(target), "field": "von Mises (MPa)", "max_value": float(values.max(initial=0.0)), "cell_count": grid.n_cells, "point_count": grid.n_points}

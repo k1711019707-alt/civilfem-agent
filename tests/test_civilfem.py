@@ -14,7 +14,7 @@ from civilfem.inputs import inspect_asset, allowed_path
 from civilfem.runtime import create_run, load_run
 from civilfem.reports import generate_report
 from civilfem.mcp_api import build_mesh, submit_simulation
-from civilfem.visualization import render_mesh
+from civilfem.visualization import render_mesh, render_stress_cloud
 from gui import build_cad_model
 
 
@@ -171,6 +171,18 @@ def test_run_manifest_and_report(tmp_path):
     assert "不替代人工复核" in Path(report["report"]).read_text(encoding="utf-8")
 
 
+def test_professional_report_contains_fem_metrics(tmp_path):
+    manifest = create_run(tmp_path, "simulation", "abc", "calculix-3d")
+    manifest.update({"status": "completed", "mesh": "mesh.msh", "input": "analysis.inp", "frd": "analysis.frd", "result": {"max_displacement": 0.25, "max_von_mises": 123.4, "displacement_units": "mm", "stress_units": "MPa", "stress_cloud": {"image": "stress_cloud.png"}}})
+    from civilfem.runtime import save_run
+    save_run(manifest)
+    report = generate_report(manifest["run_id"], tmp_path)
+    content = Path(report["report"]).read_text(encoding="utf-8")
+    assert "最大 von Mises 应力" in content
+    assert "123.4 MPa" in content
+    assert "有限元模型" in content
+
+
 def test_gmsh_builds_h_section_mesh(tmp_path):
     """Gmsh 必须生成非空 H 型钢实体网格。"""
     model = sample_model(length=300).model_dump(mode="json")
@@ -182,6 +194,34 @@ def test_gmsh_builds_h_section_mesh(tmp_path):
     image = render_mesh(result["mesh"])
     assert image["status"] == "completed"
     assert Path(image["image"]).is_file()
+
+
+def test_render_stress_cloud_creates_png(tmp_path):
+    model = sample_model(length=300).model_dump(mode="json")
+    mesh = build_mesh(model, str(tmp_path), mesh_size=100)
+    result = render_stress_cloud(mesh["mesh"], {1: 10.0}, Path(mesh["mesh"]).with_name("stress.png"))
+    assert result["status"] == "completed"
+    assert Path(result["image"]).is_file()
+    assert result["field"] == "von Mises (MPa)"
+
+
+def test_gmsh_mesh_disables_signal_handler_for_worker_threads(tmp_path, monkeypatch):
+    """Gmsh 初始化不得在线程中注册 SIGINT handler。"""
+    import gmsh
+
+    initialize = gmsh.initialize
+    arguments = {}
+
+    def initialize_without_thread_signal(*args, **kwargs):
+        arguments.update(kwargs)
+        return initialize(*args, **kwargs)
+
+    monkeypatch.setattr(gmsh, "initialize", initialize_without_thread_signal)
+    model = sample_model(length=300).model_dump(mode="json")
+    result = build_mesh(model, str(tmp_path), mesh_size=100)
+
+    assert result["status"] == "completed"
+    assert arguments["interruptible"] is False
 
 
 def test_missing_calculix_is_not_completed(tmp_path):

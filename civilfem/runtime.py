@@ -33,7 +33,13 @@ def _calculix_executable() -> str | None:
         # 返回规范化绝对路径。
         return str(Path(configured).expanduser().resolve())
     # 回退到 PATH 中的常见命令名。
-    return next((command for name in ("ccx", "calculix", "CalculiX") if (command := shutil.which(name))), None)
+    found = next((command for name in ("ccx", "calculix", "CalculiX") if (command := shutil.which(name))), None)
+    if found:
+        return found
+    for candidate in (Path(r"D:\CalculiX\ccx.exe"), Path(r"C:\CalculiX\ccx.exe")):
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def capabilities() -> dict[str, bool]:

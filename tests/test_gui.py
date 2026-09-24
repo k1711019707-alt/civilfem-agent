@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from gui import inspect_uploaded_model, parse_json_upload, save_upload
+from gui import inspect_uploaded_model, parse_json_upload, reuse_cad_confirmation, save_upload
 
 
 @pytest.fixture(autouse=True)
@@ -56,3 +56,10 @@ def test_missing_backend_never_reports_completed(monkeypatch):
     from gui import backend_available
 
     assert backend_available("calculix") is False
+
+
+def test_reuse_cad_confirmation_after_form_submit():
+    """同一 DXF 在后续按钮 rerun 中必须复用已确认模型。"""
+    confirmed = {"status": "valid", "model": {"project_id": "cad"}}
+    assert reuse_cad_confirmation("same", "same", confirmed) == confirmed
+    assert reuse_cad_confirmation("old", "same", confirmed) is None

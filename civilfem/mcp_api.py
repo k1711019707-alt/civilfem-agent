@@ -2,13 +2,17 @@
 
 # 导入类型。
 from typing import Any
+from pathlib import Path
+import shutil
 
 # 导入工作流服务和插件。
 from .workflow import inspect_input, extract_structural_model, validate_structural_model
-from .runtime import capabilities, submit_run, load_run
+from .runtime import capabilities, submit_run, load_run, create_run, save_run
 from .reports import generate_report as generate_run_report
 from .meshing import mesh_h_section
 from .solvers import solve_opensees_beam
+from .fem import build_calculix_input, parse_frd_results, run_calculix
+from .visualization import render_stress_cloud
 
 
 def build_mesh(model: dict[str, Any], project_root: str = ".", mesh_size: float = 100.0) -> dict[str, Any]:
@@ -31,6 +35,43 @@ def submit_simulation(model: dict[str, Any], project_root: str = ".", backend: s
     input_hash = model.get("input_hash") or model.get("project_id")
     # 委托运行生命周期管理器。
     return submit_run(project_root, backend, input_hash, solver_input)
+
+
+def run_fem_analysis(model: dict[str, Any], project_root: str = ".", mesh_path: str | None = None, mesh_size: float = 100.0) -> dict[str, Any]:
+    """生成三维 CalculiX 输入、执行求解、解析应力并生成云图。"""
+    manifest = create_run(project_root, "simulation", model.get("input_hash") or model.get("project_id"), "calculix-3d")
+    try:
+        if not mesh_path:
+            mesh_result = mesh_h_section(model, project_root, mesh_size)
+            mesh_path = mesh_result.get("mesh")
+        if not mesh_path:
+            raise ValueError("缺少有效 Gmsh 网格")
+        import meshio
+        mesh = meshio.read(mesh_path)
+        mesh_data = {"points": mesh.points.tolist(), "cells": [{"type": block.type, "data": block.data.tolist()} for block in mesh.cells]}
+        component = (model.get("components") or [{}])[0]
+        input_path = build_calculix_input(
+            mesh_data,
+            Path(manifest["run_dir"]) / "analysis.inp",
+            load=(float(component.get("N", 0)) * 1000, -float(component.get("V", 0)) * 1000, 0.0),
+            moment_x=float(component.get("Mx", 0)) * 1_000_000,
+        )
+        execution = run_calculix(input_path)
+        manifest.update(execution)
+        if execution.get("status") != "completed":
+            return save_run(manifest)
+        result = parse_frd_results(execution["frd"])
+        rendered_cloud = render_stress_cloud(mesh_path, result["von_mises"])
+        cloud = rendered_cloud
+        if rendered_cloud.get("status") == "completed":
+            report_cloud = Path(manifest["run_dir"]) / "stress_cloud.png"
+            shutil.copy2(rendered_cloud["image"], report_cloud)
+            cloud = {**rendered_cloud, "image": str(report_cloud)}
+        result["stress_cloud"] = cloud
+        manifest.update({"status": "completed", "result": result, "mesh": str(mesh_path), "input": str(input_path), "error": None})
+    except Exception as error:
+        manifest.update({"status": "failed", "error": f"三维 FEM 失败: {error}"})
+    return save_run(manifest)
 
 
 def get_simulation_status(run_id: str, project_root: str = ".") -> dict[str, Any]:

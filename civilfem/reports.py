@@ -24,7 +24,10 @@ def _markdown(manifest: dict[str, Any], result: dict[str, Any] | None = None) ->
     status = manifest.get("status", "unknown")
     error = manifest.get("error") or "无"
     # 将结果字典格式化为可读 JSON。
-    result_text = json.dumps(result or {}, ensure_ascii=False, indent=2)
+    result = result or {}
+    result_text = json.dumps(result, ensure_ascii=False, indent=2)
+    stress_cloud = result.get("stress_cloud") or {}
+    cloud_path = stress_cloud.get("image") or "未生成"
     # 返回固定章节报告。
     return f"""# CivilFEM 工程辅助报告
 
@@ -37,6 +40,19 @@ def _markdown(manifest: dict[str, Any], result: dict[str, Any] | None = None) ->
 - 错误：{error}
 
 ## 结果摘要
+
+| 指标 | 数值 |
+|---|---:|
+| 最大位移 | {result.get('max_displacement', '未提供')} {result.get('displacement_units', '')} |
+| 最大 von Mises 应力 | {result.get('max_von_mises', '未提供')} {result.get('stress_units', '')} |
+| 应力云图 | `{cloud_path}` |
+
+## 有限元模型
+
+- 求解器：`{manifest.get('backend') or '未指定'}`
+- 网格文件：`{manifest.get('mesh') or '未提供'}`
+- 输入文件：`{manifest.get('input') or '未提供'}`
+- 结果文件：`{manifest.get('frd') or '未提供'}`
 
 ```json
 {result_text}
@@ -82,7 +98,10 @@ def generate_report(run_id: str, project_root: str | Path = ".", result: dict[st
     content = markdown
     if fmt == "html":
         suffix = ".html"
-        content = "<html><head><meta charset='utf-8'><title>CivilFEM Report</title></head><body><pre>" + html.escape(markdown) + "</pre></body></html>"
+        result_data = result if result is not None else manifest.get("result") or {}
+        cloud = (result_data.get("stress_cloud") or {}).get("image")
+        image = f"<p><img src='{html.escape(cloud)}' alt='von Mises 应力云图' style='max-width:100%'></p>" if cloud and Path(cloud).is_file() else ""
+        content = "<html><head><meta charset='utf-8'><title>CivilFEM 专业工程报告</title><style>body{font-family:Segoe UI,Arial;max-width:1100px;margin:30px auto;line-height:1.6}table{border-collapse:collapse}td,th{border:1px solid #ccd;padding:6px 10px}h1{color:#123b5d}</style></head><body>" + image + "<pre style='white-space:pre-wrap'>" + html.escape(markdown) + "</pre></body></html>"
     # 写入运行目录下的固定文件名。
     report_path = run_dir / f"report{suffix}"
     report_path.write_text(content, encoding="utf-8")

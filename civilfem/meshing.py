@@ -62,7 +62,7 @@ def mesh_h_section(model: dict[str, Any], project_root: str | Path = ".", mesh_s
     # 确定网格输出路径。
     mesh_path = Path(manifest["run_dir"]) / "mesh.msh"
     # 初始化 Gmsh 生命周期。
-    gmsh.initialize()
+    gmsh.initialize(interruptible=False)
     try:
         # 禁止终端噪声，日志由运行清单负责。
         gmsh.option.setNumber("General.Terminal", 0)

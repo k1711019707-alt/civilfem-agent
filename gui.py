@@ -6,6 +6,7 @@ from __future__ import annotations
 # 导入 JSON、路径和类型工具。
 import json
 import copy
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from civilfem.mcp_api import (
     get_result_summary,
     get_simulation_status,
     submit_simulation,
+    run_fem_analysis,
 )
 from civilfem.runtime import capabilities
 from civilfem.security import configured_project_root
@@ -105,6 +107,15 @@ def build_cad_model(geometry: dict[str, Any], parameters: dict[str, Any]) -> dic
     return {"status": "valid" if validation.get("status") == "valid" else "pending_confirmation", "validation": validation, "model": model.model_dump(mode="json"), "error": None}
 
 
+def reuse_cad_confirmation(previous_hash: str | None, current_hash: str, inspection: dict[str, Any] | None) -> dict[str, Any] | None:
+    """同一上传文件的后续 rerun 复用已确认 CAD 模型，避免表单循环。"""
+    # 仅复用同一文件且已通过验证的确认结果。
+    if previous_hash == current_hash and inspection and inspection.get("status") == "valid" and inspection.get("model"):
+        return inspection
+    # 新文件、未确认或无效结果必须重新确认。
+    return None
+
+
 def backend_available(backend: str) -> bool:
     """返回指定后端当前是否可用。"""
     # 仅查询既有能力探测结果，不改变后端状态。
@@ -148,16 +159,35 @@ def main() -> None:
     """渲染中文 Streamlit 页面并串联完整流程。"""
     # 延迟导入可选 GUI 依赖。
     import streamlit as st
-
-    # 初始化页面标题和布局。
+    # 初始化页面标题和布局，必须先于其他 Streamlit 输出。
     st.set_page_config(page_title="CivilFEM Agent", page_icon="🏗️", layout="wide")
+    # 视觉稿使用工程蓝和浅色卡片，CSS 仅服务本次明确的 GUI 视觉优化。
+    st.markdown("""
+    <style>
+    :root { --navy:#102a43; --blue:#2563eb; --line:#d9e2ec; }
+    .block-container { max-width: 1480px; padding-top: 2rem; }
+    [data-testid="stMetric"] { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#f8fafc; }
+    [data-testid="stVerticalBlockBorderWrapper"] { border-radius:12px; border-color:var(--line); }
+    .civfem-step { color:var(--navy); font-size:.9rem; padding:.55rem .4rem; border-bottom:3px solid var(--line); }
+    .civfem-step:first-child { border-color:var(--blue); }
+    </style>
+    """, unsafe_allow_html=True)
+    # 视觉稿顶部流程条，帮助用户理解当前工作阶段。
+    st.markdown("""
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:0 0 18px">
+      <div class="civfem-step">① CAD 导入</div><div class="civfem-step">② 参数确认</div>
+      <div class="civfem-step">③ 网格生成</div><div class="civfem-step">④ 求解</div><div class="civfem-step">⑤ 报告</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.title("CivilFEM Agent：多构件有限元工程控制台")
     st.caption("输入检查 → 模型验证 → Gmsh 网格 → 求解 → 结果与报告")
     # 读取项目根配置并显示后端能力。
     project_root = configured_project_root()
-    st.info(f"项目根目录：{project_root}")
-    st.subheader("后端能力")
-    st.json(capabilities())
+    st.caption(f"项目目录：{project_root}")
+    with st.container(horizontal=True, horizontal_alignment="distribute"):
+        st.caption(f"项目目录：{project_root}")
+        st.caption("可用后端：" + " · ".join(name for name, enabled in capabilities().items() if enabled) or "未检测到")
     # 接收 JSON 或 DXF 图纸并保存到受控目录。
     uploaded = st.file_uploader("上传结构 JSON 或 DXF 图纸", type=["json", "dxf"])
     if uploaded is None:
@@ -165,6 +195,7 @@ def main() -> None:
         return
     # 缓存上传文件，避免页面刷新时丢失路径。
     raw = uploaded.getvalue()
+    upload_hash = hashlib.sha256(raw).hexdigest()
     try:
         input_path = save_upload(raw, uploaded.name, project_root)
     except Exception as error:
@@ -173,6 +204,11 @@ def main() -> None:
     # 执行输入检查；DXF 先只读摘要，避免从图纸静默猜工程参数。
     if input_path.suffix.lower() == ".dxf":
         cad_inspection = inspect_input(str(input_path), str(project_root))
+        # 将 CAD 摘要压缩为视觉稿中的三个关键指标。
+        cad_metric_a, cad_metric_b, cad_metric_c = st.columns(3)
+        cad_metric_a.metric("实体数量", cad_inspection.get("entity_count", 0))
+        cad_metric_b.metric("图层数量", len(cad_inspection.get("layers", [])))
+        cad_metric_c.metric("线段长度", f"{float(cad_inspection.get('line_length') or 0):,.2f}")
         _show_json(st, "CAD 图纸检查", cad_inspection)
         if cad_inspection.get("status") != "inspected":
             st.error(cad_inspection.get("issues") or "DXF 检查失败。")
@@ -180,23 +216,27 @@ def main() -> None:
         st.warning("DXF 只提供几何证据；截面、材料、荷载、长度和边界必须人工确认。DWG 请先另存为 DXF。")
         bounds = cad_inspection.get("bounds") or [0.0, 0.0, 0.0, 0.0]
         default_length = max(float(cad_inspection.get("line_length") or 0), float(bounds[2]) - float(bounds[0]))
-        with st.form("cad_parameters", border=True):
-            st.subheader("确认工程参数")
-            cad_id = st.text_input("构件编号", value="CAD-B-1")
-            col1, col2 = st.columns(2)
-            h = col1.number_input("截面高度 h（mm）", min_value=0.1, value=300.0)
-            b = col2.number_input("翼缘宽度 b（mm）", min_value=0.1, value=300.0)
-            tw = col1.number_input("腹板厚度 tw（mm）", min_value=0.1, value=10.0)
-            tf = col2.number_input("翼缘厚度 tf（mm）", min_value=0.1, value=15.0)
-            steel = st.text_input("钢材牌号", value="Q355")
-            length = st.number_input("构件长度（mm，需确认）", min_value=0.1, value=max(default_length, 6000.0))
-            m_x = st.number_input("弯矩 Mx（kN·m）", value=0.0)
-            shear = st.number_input("剪力 V（kN）", value=0.0)
-            confirmed = st.form_submit_button("确认 CAD 参数并建立模型", type="primary")
-        if not confirmed:
-            return
-        cad_model = build_cad_model({"project_id": input_path.stem, "length": length}, {"id": cad_id, "h": h, "b": b, "tw": tw, "tf": tf, "steel": steel, "length": length, "Mx": m_x, "V": shear})
-        inspection = cad_model
+        inspection = reuse_cad_confirmation(st.session_state.get("cad_input_hash"), upload_hash, st.session_state.get("cad_inspection"))
+        if inspection is None:
+            with st.form("cad_parameters", border=True):
+                st.subheader("确认工程参数")
+                cad_id = st.text_input("构件编号", value="CAD-B-1")
+                col1, col2 = st.columns(2)
+                h = col1.number_input("截面高度 h（mm）", min_value=0.1, value=300.0)
+                b = col2.number_input("翼缘宽度 b（mm）", min_value=0.1, value=300.0)
+                tw = col1.number_input("腹板厚度 tw（mm）", min_value=0.1, value=10.0)
+                tf = col2.number_input("翼缘厚度 tf（mm）", min_value=0.1, value=15.0)
+                steel = st.text_input("钢材牌号", value="Q355")
+                length = st.number_input("构件长度（mm，需确认）", min_value=0.1, value=max(default_length, 6000.0))
+                m_x = st.number_input("弯矩 Mx（kN·m）", value=0.0)
+                shear = st.number_input("剪力 V（kN）", value=0.0)
+                confirmed = st.form_submit_button("确认 CAD 参数并建立模型", type="primary")
+            if not confirmed:
+                return
+            inspection = build_cad_model({"project_id": input_path.stem, "length": length}, {"id": cad_id, "h": h, "b": b, "tw": tw, "tf": tf, "steel": steel, "length": length, "Mx": m_x, "V": shear})
+            if inspection.get("status") == "valid":
+                st.session_state["cad_input_hash"] = upload_hash
+                st.session_state["cad_inspection"] = inspection
     else:
         # JSON 直接执行输入检查、模型提取和验证。
         inspection = inspect_uploaded_model(input_path, project_root)
@@ -208,6 +248,14 @@ def main() -> None:
         st.error(inspection.get("error") or "模型未通过验证，已停止后续流程。")
         return
     model = inspection["model"]
+    # 模型验证成功后显示视觉稿中的工程状态卡。
+    st.success("模型已验证，可以进入网格和求解。", icon=":material/check_circle:")
+    status_a, status_b, status_c = st.columns(3)
+    mesh_status = st.session_state.get("mesh") or {}
+    run_status = st.session_state.get("run") or {}
+    status_a.metric("网格状态", "已完成" if mesh_status.get("status") == "completed" else "待生成")
+    status_b.metric("求解状态", run_status.get("status", "待提交"))
+    status_c.metric("工程报告", "可下载" if run_status.get("run_id") else "待生成")
     # 网格参数和生成按钮。
     st.subheader("Gmsh 网格")
     mesh_size = st.number_input("网格尺寸（mm）", min_value=0.1, value=100.0, step=10.0)
@@ -244,11 +292,24 @@ def main() -> None:
         with st.spinner("正在提交求解…"):
             run = submit_backend(solver_model, project_root, backend, solver_path)
         st.session_state["run"] = run
+    if st.button("运行三维 FEM 并生成应力云图", type="primary"):
+        with st.spinner("正在调用 CalculiX 进行三维有限元分析..."):
+            run = run_fem_analysis(model, str(project_root), (mesh or {}).get("mesh"), mesh_size)
+        st.session_state["run"] = run
     # 展示运行状态、结果摘要和可下载报告。
     run = st.session_state.get("run")
     if not run:
         return
     _show_json(st, "运行状态", run)
+    fem_result = run.get("result") or {}
+    cloud = (fem_result.get("stress_cloud") or {}).get("image")
+    if cloud and Path(cloud).is_file():
+        st.subheader("von Mises 应力云图")
+        st.image(cloud, caption="von Mises 应力（MPa）")
+    if "max_von_mises" in fem_result:
+        metric_a, metric_b = st.columns(2)
+        metric_a.metric("最大 von Mises 应力", f"{fem_result['max_von_mises']:.3f} MPa")
+        metric_b.metric("最大位移", f"{fem_result['max_displacement']:.6f} mm")
     if run.get("status") in {"failed", "not_implemented", "pending_confirmation"}:
         st.error(run.get("error") or "求解未完成")
         return
